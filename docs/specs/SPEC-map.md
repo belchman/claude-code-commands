@@ -98,7 +98,7 @@ project-root/
 - **Tests**: `npm test` runs vitest against `tests/`
 ```
 
-**Discovery approach**: Glob for files, read package.json/Cargo.toml/etc., identify framework from dependencies, annotate directories by inspecting representative files.
+**Discovery approach**: Glob for files, read manifest files (package.json, Cargo.toml, pyproject.toml, go.mod, and any other language-specific manifests found), identify framework from dependencies, annotate directories by inspecting representative files.
 
 ### Section 2: Dependencies
 
@@ -288,10 +288,10 @@ Same as Mode 1, but:
 ```
 You are a project structure analyst. Your job is to understand and document this project's layout.
 
-1. Check for manifest files: package.json, Cargo.toml, pyproject.toml, go.mod, Gemfile, pom.xml, etc.
-2. First run `ls` on the project root to discover the actual directory layout. Then glob for source files in discovered directories. Common patterns include `src/`, `lib/`, `app/`, `pkg/`, `cmd/`, `internal/`, or top-level package directories. Adapt to what exists.
-3. Glob for test files: tests/**/*.*, test/**/*.*, spec/**/*.*, __tests__/**/*.*
-4. Glob for config files: *.config.*, .eslintrc.*, tsconfig.*, etc.
+1. Check for manifest files (examples, not exhaustive): package.json, Cargo.toml, pyproject.toml, go.mod, mix.exs, build.sbt. Also check the project root for any other build, package, or dependency files specific to the detected language.
+2. First run `ls` on the project root to discover the actual directory layout. Do NOT limit yourself to common patterns — explore ALL directories that contain source code. Common examples include `src/`, `lib/`, `app/`, `pkg/`, `cmd/`, `internal/`, `Sources/`, `crates/`, `packages/`, but always adapt to what actually exists. Do not assume `src/` is the only source directory. If no language can be determined from manifests or file extensions, treat all non-binary files as potential source code. Note the uncertainty in the output.
+3. Glob for test files in common directories: tests/**/*, test/**/*, spec/**/*, __tests__/**/* Also check for language-specific conventions (examples, not exhaustive): *_test.go (Go), test_*.py (Python), *_spec.rb (Ruby), t/*.t (Perl), src/test/**/* (Java/Maven). In Rust, look for inline #[cfg(test)] modules. For any other language detected, check for its test file naming conventions.
+4. Glob for config files (examples, not exhaustive): .eslintrc.* (JS), rustfmt.toml (Rust), .rubocop.yml (Ruby), mypy.ini (Python), .golangci.yml (Go), .formatter.exs (Elixir). Also search the root for any other dotfiles and YAML/TOML/JSON files that appear to be linter, formatter, or build tool configuration for the detected language.
 5. Read the manifest to identify language, framework, and project purpose
 6. Read 2-3 representative source files to understand the code style
 
@@ -308,7 +308,7 @@ Output ONLY the markdown for the Structure section. No preamble.
 ```
 You are a dependency analyst. Your job is to map how modules connect in this project.
 
-1. Grep for import/require/use/include statements across all source files
+1. First identify the project's language(s) from manifests and file extensions. Then grep for language-appropriate import patterns (examples, not exhaustive): `import`/`from` (Python/JS/TS/Java/Go/Swift/Dart), `require`/`require_relative` (Ruby/Node), `use`/`mod` (Rust), `using` (C#), `#include` (C/C++), `open` (OCaml). For any language not listed, research its module/import system and grep for the appropriate keywords. Only search source files, not comments or documentation. If no language can be determined, search broadly for import-like statements.
 2. Build a list of: [source_file, imported_module] pairs
 3. Count fan-in for each module (how many files import it)
 4. Identify the top 10 most-imported modules (these are key interfaces)
@@ -346,11 +346,11 @@ The orchestrator extracts the last ` ```json ` block from the dependency-mapper'
 You are a codebase convention analyst. Your job is to identify patterns and practices in this project.
 
 1. Read 3-5 source files from different areas of the codebase
-2. Read any linter/formatter configs (.eslintrc, .prettierrc, rustfmt.toml, etc.)
-3. Read the language-specific config (tsconfig.json, pyproject.toml, Cargo.toml, go.mod, Gemfile, pom.xml, build.gradle, etc.) if present
+2. Read any linter/formatter configs (examples, not exhaustive): .eslintrc, .prettierrc (JS), rustfmt.toml (Rust), .rubocop.yml (Ruby), .pylintrc, .flake8 (Python), .golangci.yml (Go), .clang-format (C/C++), .editorconfig. Also search root for any other linter/formatter config files specific to the detected language.
+3. Read the language-specific config if present (examples, not exhaustive): tsconfig.json (JS/TS), pyproject.toml (Python), Cargo.toml (Rust), go.mod (Go), Gemfile (Ruby), pom.xml/build.gradle (Java), mix.exs (Elixir), build.sbt (Scala). Check for any other language-specific project configuration files.
 4. Check for infrastructure/build configs: Makefile, Dockerfile*, docker-compose*, .env*
-5. Read CI config if present (.github/workflows, Jenkinsfile, etc.)
-6. Check for a CLAUDE.md, CONTRIBUTING.md, or similar convention docs
+5. Read CI config if present: .github/workflows/**/*, .gitlab-ci.yml, .circleci/**/*, Jenkinsfile*, .buildkite/**/*, .travis.yml, azure-pipelines.yml, bitbucket-pipelines.yml. Check for any other CI/automation configuration present.
+6. Check for CLAUDE.md, AGENTS.md, GEMINI.md, COPILOT.md, CURSOR.md, AIDER.md, .cursorrules, .windsurfrules, .clinerules, .github/copilot-instructions.md, CONTRIBUTING.md, or any root-level markdown or dotfile that appears to contain AI assistant instructions or contribution guidelines.
 7. Look for patterns: error handling, naming, file organization, testing approach
 
 Produce a Conventions section with:
@@ -405,7 +405,7 @@ This is a heuristic and may need per-language tuning. The `from ['\"]` pattern r
 
 | Scenario | Behavior |
 |----------|----------|
-| Monorepo with multiple packages | Discover sub-packages by looking for nested manifest files (package.json, Cargo.toml, go.mod, etc.). Each sub-package gets a subsection under Structure with its own directory tree. The dependency graph includes cross-package edges. Limit to 2 levels of nesting. |
+| Monorepo with multiple packages | Discover sub-packages by looking for nested manifest files (examples, not exhaustive: package.json, Cargo.toml, go.mod, pyproject.toml, mix.exs, build.sbt). Each sub-package gets a subsection under Structure with its own directory tree. The dependency graph includes cross-package edges. Limit to 2 levels of nesting. |
 | No git history (fresh repo) | If `git rev-parse HEAD` fails (no commits), run in full mode and set `last-mapped` to `0000000`. The next incremental run treats this as "full remap needed." |
 | `ARCHITECTURE.md` exists but has no metadata block | Parse the existing file for known section headings (`## Structure`, `## Dependencies`, `## Conventions`, `## Change Impact Map`). Content under recognized headings is treated as seed data for those sections (read for context, then regenerated). Content not under recognized headings is wrapped in `<!-- manual -->` blocks. Warn the user about what content was wrapped and that they can remove the `<!-- manual -->` tags afterward. Add the metadata block. Then run Mode 3 (full regeneration) so the manual-wrapped content is preserved via Mode 3's re-injection logic. |
 | Very large repo (>1000 files) | Limit directory tree to 2 levels deep. Focus dependency graph on top 20 fan-in modules. |
@@ -527,17 +527,17 @@ Split `$ARGUMENTS` on whitespace.
 2. Dispatch three agents in parallel using the Agent tool (subagent_type: "general-purpose"):
    - **structure-mapper**: Produces `## Structure` markdown. Agent prompt:
      > You are a project structure analyst. Your job is to understand and document this project's layout.
-     > 1. Check for manifest files: package.json, Cargo.toml, pyproject.toml, go.mod, Gemfile, pom.xml, etc.
-     > 2. First run `ls` on the project root to discover the actual directory layout. Then glob for source files in discovered directories. Common patterns include `src/`, `lib/`, `app/`, `pkg/`, `cmd/`, `internal/`, or top-level package directories. Adapt to what exists.
-     > 3. Glob for test files: tests/**/*.*, test/**/*.*, spec/**/*.*, __tests__/**/*.*
-     > 4. Glob for config files: *.config.*, .eslintrc.*, tsconfig.*, etc.
+     > 1. Check for manifest files (examples, not exhaustive): package.json, Cargo.toml, pyproject.toml, go.mod, mix.exs, build.sbt. Also check the project root for any other build, package, or dependency files specific to the detected language.
+     > 2. First run `ls` on the project root to discover the actual directory layout. Do NOT limit yourself to common patterns — explore ALL directories that contain source code. Common examples include `src/`, `lib/`, `app/`, `pkg/`, `cmd/`, `internal/`, `Sources/`, `crates/`, `packages/`, but always adapt to what actually exists. Do not assume `src/` is the only source directory. If no language can be determined from manifests or file extensions, treat all non-binary files as potential source code. Note the uncertainty in the output.
+     > 3. Glob for test files in common directories: tests/**/*, test/**/*, spec/**/*, __tests__/**/* Also check for language-specific conventions (examples, not exhaustive): *_test.go (Go), test_*.py (Python), *_spec.rb (Ruby), t/*.t (Perl), src/test/**/* (Java/Maven). In Rust, look for inline #[cfg(test)] modules. For any other language detected, check for its test file naming conventions.
+     > 4. Glob for config files (examples, not exhaustive): .eslintrc.* (JS), rustfmt.toml (Rust), .rubocop.yml (Ruby), mypy.ini (Python), .golangci.yml (Go), .formatter.exs (Elixir). Also search the root for any other dotfiles and YAML/TOML/JSON files that appear to be linter, formatter, or build tool configuration for the detected language.
      > 5. Read the manifest to identify language, framework, and project purpose
      > 6. Read 2-3 representative source files to understand the code style
      > Produce a Structure section with: brief project description (1-2 sentences), annotated directory tree (only directories and key files, not every file), key entry points (application start, CLI, test runner).
      > Output ONLY the markdown for the Structure section. No preamble.
    - **dependency-mapper**: Produces `## Dependencies` markdown + structured JSON. Agent prompt:
      > You are a dependency analyst. Your job is to map how modules connect in this project.
-     > 1. Grep for import/require/use/include statements across all source files
+     > 1. First identify the project's language(s) from manifests and file extensions. Then grep for language-appropriate import patterns (examples, not exhaustive): `import`/`from` (Python/JS/TS/Java/Go/Swift/Dart), `require`/`require_relative` (Ruby/Node), `use`/`mod` (Rust), `using` (C#), `#include` (C/C++), `open` (OCaml). For any language not listed, research its module/import system and grep for the appropriate keywords. Only search source files, not comments or documentation. If no language can be determined, search broadly for import-like statements.
      > 2. Build a list of: [source_file, imported_module] pairs
      > 3. Count fan-in for each module (how many files import it)
      > 4. Identify the top 10 most-imported modules (these are key interfaces)
@@ -550,11 +550,11 @@ Split `$ARGUMENTS` on whitespace.
    - **convention-scanner**: Produces `## Conventions` markdown. Agent prompt:
      > You are a codebase convention analyst. Your job is to identify patterns and practices in this project.
      > 1. Read 3-5 source files from different areas of the codebase
-     > 2. Read any linter/formatter configs (.eslintrc, .prettierrc, rustfmt.toml, etc.)
-     > 3. Read the language-specific config (tsconfig.json, pyproject.toml, Cargo.toml, go.mod, Gemfile, pom.xml, build.gradle, etc.) if present
+     > 2. Read any linter/formatter configs (examples, not exhaustive): .eslintrc, .prettierrc (JS), rustfmt.toml (Rust), .rubocop.yml (Ruby), .pylintrc, .flake8 (Python), .golangci.yml (Go), .clang-format (C/C++), .editorconfig. Also search root for any other linter/formatter config files specific to the detected language.
+     > 3. Read the language-specific config if present (examples, not exhaustive): tsconfig.json (JS/TS), pyproject.toml (Python), Cargo.toml (Rust), go.mod (Go), Gemfile (Ruby), pom.xml/build.gradle (Java), mix.exs (Elixir), build.sbt (Scala). Check for any other language-specific project configuration files.
      > 4. Check for infrastructure/build configs: Makefile, Dockerfile*, docker-compose*, .env*
-     > 5. Read CI config if present (.github/workflows, Jenkinsfile, etc.)
-     > 6. Check for a CLAUDE.md, CONTRIBUTING.md, or similar convention docs
+     > 5. Read CI config if present: .github/workflows/**/*, .gitlab-ci.yml, .circleci/**/*, Jenkinsfile*, .buildkite/**/*, .travis.yml, azure-pipelines.yml, bitbucket-pipelines.yml. Check for any other CI/automation configuration present.
+     > 6. Check for CLAUDE.md, AGENTS.md, GEMINI.md, COPILOT.md, CURSOR.md, AIDER.md, .cursorrules, .windsurfrules, .clinerules, .github/copilot-instructions.md, CONTRIBUTING.md, or any root-level markdown or dotfile that appears to contain AI assistant instructions or contribution guidelines.
      > 7. Look for patterns: error handling, naming, file organization, testing approach
      > Produce a Conventions section with: Patterns subsection (3-7 bullet points), Configuration subsection (key config choices), Established Practices subsection (implicit rules observed across multiple files).
      > Output ONLY the markdown for the Conventions section. No preamble.
