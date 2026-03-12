@@ -297,7 +297,7 @@ You are a project structure analyst. Your job is to understand and document this
 
 Produce a Structure section with:
 - Brief project description (1-2 sentences)
-- Annotated directory tree (only directories and key files, not every file)
+- Annotated directory tree (only directories and key files, not every file). Limit directory tree to 3 levels deep, ~30 entries max. For monorepos, show package/workspace boundaries and note the count of sub-packages.
 - Key entry points (application start, CLI, test runner)
 
 Output ONLY the markdown for the Structure section. No preamble.
@@ -399,16 +399,18 @@ git diff HEAD -G "^(import |import\(|from ['\"]|require\(|require |use |use;|pub
 
 This is a heuristic and may need per-language tuning. The `from ['\"]` pattern reduces false positives from prose by requiring a quote character. Indented imports (e.g., dynamic imports inside functions) are still caught because the file appears in the broader `--name-status` diff. False positives are acceptable since they only cause unnecessary but harmless section updates. Untracked files (from `git ls-files --others`) use file-level status only — their imports are not inspected until they are committed or staged. This gives only files where import lines changed, which is the trigger for dependency updates.
 
+For languages not covered by the regex heuristic above, detect changed imports by checking if the diff for each modified file includes changes to lines matching the language-appropriate import patterns identified during the initial mapping. If the language is unknown, treat any change in the first 50 lines of a source file as a potential import change.
+
 ---
 
 ## Edge Cases
 
 | Scenario | Behavior |
 |----------|----------|
-| Monorepo with multiple packages | Discover sub-packages by looking for nested manifest files (examples, not exhaustive: package.json, Cargo.toml, go.mod, pyproject.toml, mix.exs, build.sbt). Each sub-package gets a subsection under Structure with its own directory tree. The dependency graph includes cross-package edges. Limit to 2 levels of nesting. |
+| Monorepo with multiple packages | Discover sub-packages by looking for nested manifest files (package.json, Cargo.toml, go.mod, and other manifest files for the detected language). Each sub-package gets a subsection under Structure with its own directory tree. The dependency graph includes cross-package edges. Limit to 3 levels. |
 | No git history (fresh repo) | If `git rev-parse HEAD` fails (no commits), run in full mode and set `last-mapped` to `0000000`. The next incremental run treats this as "full remap needed." |
 | `ARCHITECTURE.md` exists but has no metadata block | Parse the existing file for known section headings (`## Structure`, `## Dependencies`, `## Conventions`, `## Change Impact Map`). Content under recognized headings is treated as seed data for those sections (read for context, then regenerated). Content not under recognized headings is wrapped in `<!-- manual -->` blocks. Warn the user about what content was wrapped and that they can remove the `<!-- manual -->` tags afterward. Add the metadata block. Then run Mode 3 (full regeneration) so the manual-wrapped content is preserved via Mode 3's re-injection logic. |
-| Very large repo (>1000 files) | Limit directory tree to 2 levels deep. Focus dependency graph on top 20 fan-in modules. |
+| Very large repo (>1000 files) | Limit directory tree to 3 levels deep, ~30 entries max. Focus dependency graph on top 20 fan-in modules. |
 | Binary-heavy repo | Skip binary files in analysis. Note binary directories in Structure with counts only. |
 | No source files (docs-only repo) | Generate Structure and Conventions sections only. Conventions should note that no source files were found. Skip Dependencies and Change Impact Map. Set `sections-updated` to `structure,conventions`. |
 
@@ -479,14 +481,16 @@ When `/adversarial-review` runs, it should:
    - **Conventions** — evaluate code against established project conventions
 3. Read project-level overrides from `.claude/review-config.md` if it exists (custom reviewer focus areas, files to ignore, severity overrides)
 
+Note: `/map` intentionally analyzes the full project regardless of `.claude/review-config.md` ignore patterns. The review-config is consumed only by `/adversarial-review`.
+
 ---
 
 ## File Locations
 
 | File | Location | Committed to git? |
 |------|----------|-------------------|
-| `/map` command | `~/.claude/commands/map.md` | No (user-level) |
-| `/adversarial-review` command | `~/.claude/commands/adversarial-review.md` | No (user-level) |
+| `/map` command | `commands/map.md` (in the project-tools plugin repo) | Yes |
+| `/adversarial-review` command | `commands/adversarial-review.md` (in the project-tools plugin repo) | Yes |
 | `ARCHITECTURE.md` artifact | `<repo-root>/ARCHITECTURE.md` | Yes |
 | Review config overrides | `<repo-root>/.claude/review-config.md` | Yes (optional) |
 
@@ -533,7 +537,7 @@ Split `$ARGUMENTS` on whitespace.
      > 4. Glob for config files (examples, not exhaustive): .eslintrc.* (JS), rustfmt.toml (Rust), .rubocop.yml (Ruby), mypy.ini (Python), .golangci.yml (Go), .formatter.exs (Elixir). Also search the root for any other dotfiles and YAML/TOML/JSON files that appear to be linter, formatter, or build tool configuration for the detected language.
      > 5. Read the manifest to identify language, framework, and project purpose
      > 6. Read 2-3 representative source files to understand the code style
-     > Produce a Structure section with: brief project description (1-2 sentences), annotated directory tree (only directories and key files, not every file), key entry points (application start, CLI, test runner).
+     > Produce a Structure section with: brief project description (1-2 sentences), annotated directory tree (only directories and key files, not every file; limit to 3 levels deep, ~30 entries max; for monorepos, show package/workspace boundaries and note the count of sub-packages), key entry points (application start, CLI, test runner).
      > Output ONLY the markdown for the Structure section. No preamble.
    - **dependency-mapper**: Produces `## Dependencies` markdown + structured JSON. Agent prompt:
      > You are a dependency analyst. Your job is to map how modules connect in this project.
@@ -592,4 +596,8 @@ Split `$ARGUMENTS` on whitespace.
 - Write permission denied or read-only file: print error and stop.
 - Agent failure: retry once, then skip with warning.
 - Corrupt metadata: treat as no metadata, run full generation.
+
+## Notes
+
+- `/map` intentionally analyzes the full project regardless of `.claude/review-config.md` ignore patterns. The review-config is consumed only by `/adversarial-review`.
 ````
