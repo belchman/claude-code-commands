@@ -11,7 +11,7 @@
 
 `/adversarial-review` discovers a project's documentation, configuration, and code, then launches three domain-specific reviewer agents in parallel. Findings are merged, presented to the user, and optionally fixed by an adversarial PM agent.
 
-The skill is **project-agnostic** — it auto-discovers what exists and adapts its review scope accordingly. When `ARCHITECTURE.md` exists (from `/map`), it uses the Impact Map and dependency graph to prioritize high-risk findings.
+The skill is **project-agnostic** — it auto-discovers what exists and adapts its review scope accordingly. When `ARCHITECTURE.md` exists (from `/map`), it uses the Change Impact Map and dependency graph to prioritize high-risk findings.
 
 ---
 
@@ -45,7 +45,7 @@ The skill is **project-agnostic** — it auto-discovers what exists and adapts i
 Before launching any agents, the orchestrator must understand the project. Steps:
 
 1. **Check for `ARCHITECTURE.md`** at the repo root.
-   - If it exists: read it and extract the Impact Map, Dependencies (Mermaid graph), and Conventions sections. These provide review context.
+   - If it exists: read it and extract the Change Impact Map, Dependencies (Mermaid graph), and Conventions sections. These provide review context.
    - If it does not exist: print a suggestion — "No ARCHITECTURE.md found. Consider running `/map` first for richer context." Then proceed with manual discovery.
 
 2. **Check for project-level overrides** at `.claude/review-config.md`.
@@ -65,7 +65,7 @@ Before launching any agents, the orchestrator must understand the project. Steps
 
 5. **If `--diff` was passed**: scope the review.
    - If `ARCHITECTURE.md` exists with a `last-mapped` SHA: use `git diff <last-mapped-sha>..HEAD --name-status` to find changed files since last map.
-   - Otherwise: use `git diff HEAD~1..HEAD --name-status` for committed changes + `git diff HEAD --name-status` for uncommitted changes.
+   - Otherwise: use `git diff HEAD~1..HEAD --name-status` for committed changes + `git diff HEAD --name-status` for uncommitted changes. Print a warning to the user: "No valid `/map` baseline found. Diffing against HEAD~1 only. Consider running `/map` first for a comprehensive baseline."
    - Filter the discovered files to only include changed files and their direct dependents (files that import them, identified from ARCHITECTURE.md's dependency graph if available).
    - Always include `CLAUDE.md` and any project instruction files in the review context (even if unchanged) since they're needed for cross-referencing.
 
@@ -84,7 +84,9 @@ Before launching any agents, the orchestrator must understand the project. Steps
 
 ### Phase 2: Parallel Adversarial Review
 
-Launch **three reviewer agents in parallel** using separate Agent tool calls in a single response. Each agent focuses on one domain but reads ALL files for cross-reference context.
+Launch **three reviewer agents in parallel** using separate Agent tool calls (subagent_type: "general-purpose") in a single response. Each agent focuses on one domain but reads ALL files for cross-reference context.
+
+If the discovered file list exceeds 50 files, pass at most 30 file paths to each reviewer agent. Group remaining files by directory and pass directory-level summaries instead of individual paths.
 
 **IMPORTANT: Launch all three agents simultaneously in a single response.**
 
@@ -148,12 +150,11 @@ Return ONLY findings as numbered markdown. Each finding must have: number, file+
 
 ```
 You are an adversarial TEST COVERAGE reviewer. Focus on:
-- Exported functions/classes missing test behaviors (will break 100% coverage)
+- Exported functions/classes that appear to lack test coverage (check the project's coverage config for threshold)
 - Test behaviors that can't be implemented as described
-- Gherkin scenarios that violate the test framework's requirements
+- Check for specialized testing paradigms (BDD/Gherkin `.feature` files, property-based testing, snapshot testing, contract testing) and validate against their framework requirements. For all other tests, evaluate against the project's actual testing patterns.
 - Coverage config that excludes too much or too little
-- Test lifecycle patterns that conflict with the BDD framework
-- Computation logic that is specified in types but never defined in behaviors
+- Interfaces, abstract definitions, or contracts that declare behavior but lack implementations or tests. Skip if the language doesn't use explicit type/interface declarations.
 
 [PROJECT CONTEXT from ARCHITECTURE.md if available]
 
@@ -304,7 +305,7 @@ When `--diff` is passed, the review is scoped to recent changes:
 1. **Determine the base reference**:
    - If `ARCHITECTURE.md` exists with `last-mapped` SHA: use that SHA as the base
    - If `ARCHITECTURE.md` exists but `last-mapped` is `0000000`: fall back to full review
-   - Otherwise: use `HEAD~1` as the base (last commit)
+   - Otherwise: use `HEAD~1` as the base (last commit). Print a warning to the user: "No valid `/map` baseline found. Diffing against HEAD~1 only. Consider running `/map` first for a comprehensive baseline."
 
 2. **Gather changed files**:
    - `git diff <base>..HEAD --name-status` for committed changes
@@ -342,13 +343,25 @@ When `--diff` is passed, the review is scoped to recent changes:
 
 ---
 
+## Error Handling
+
+| Condition | Behavior |
+|-----------|----------|
+| Not a git repo | Print warning: "Not a git repository. Running full review (--diff ignored if present)." Proceed without diff capability. |
+| Git unavailable | Print warning: "Git not found. Running full review (--diff ignored if present)." Proceed without diff capability. |
+| Shallow clone | Print warning: "Shallow clone detected. Diff history may be limited." Proceed with available history. |
+| `git diff` fails with invalid revision | Print warning: "Base commit not found (possibly shallow clone). Running full review." Ignore --diff. |
+| Single reviewer agent fails | Retry once. If it fails again, proceed with findings from the other reviewers. Note which reviewer was skipped. |
+
+---
+
 ## Integration with `/map`
 
 When `ARCHITECTURE.md` exists, the review is enhanced:
 
 | ARCHITECTURE.md Section | How It's Used |
 |------------------------|---------------|
-| **Impact Map → High-Coupling Zones** | Findings affecting these files get `[HIGH RISK]` annotation. Reviewers are told to scrutinize changes to these files more carefully. |
+| **Change Impact Map → High-Coupling Zones** | Findings affecting these files get `[HIGH RISK]` annotation. Reviewers are told to scrutinize changes to these files more carefully. |
 | **Dependencies → Mermaid Graph** | Used in `--diff` mode to expand review scope to dependent files. Also used by spec-reviewer to verify that documented interfaces match implementations. |
 | **Conventions** | Included in reviewer context so they can flag code that violates established patterns. |
 | **Structure** | Helps reviewers understand the project layout without re-discovering it. |
@@ -373,6 +386,6 @@ When `ARCHITECTURE.md` exists, the review is enhanced:
 
 | File | Location | Committed to git? |
 |------|----------|-------------------|
-| `/adversarial-review` command | `~/.claude/commands/adversarial-review.md` | No (user-level) |
+| `/adversarial-review` command | `commands/adversarial-review.md` (in the project-tools plugin repo) | No (user-level) |
 | Review config overrides | `<repo-root>/.claude/review-config.md` | Yes (optional) |
 | `ARCHITECTURE.md` (consumed) | `<repo-root>/ARCHITECTURE.md` | Yes (from `/map`) |
