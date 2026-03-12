@@ -10,7 +10,7 @@
 
 ## Context
 
-Two slash commands (`/map`, `/adversarial-review`) exist as user-level files in `~/.claude/commands/`. They work but have 18 known issues from adversarial review, primarily:
+Two slash commands (`/map`, `/adversarial-review`) exist as user-level files in `~/.claude/commands/`. They work but have 18 findings from adversarial review (numbered #1–#18), primarily:
 
 - Static file/pattern lists biased toward JS/TS/Python/Rust/Go ecosystem
 - Cross-file misalignment (different CI globs, different example sets, naming inconsistencies)
@@ -140,10 +140,10 @@ Additionally: replace ALL `etc.`, `or similar`, and `or equivalent` catch-alls i
 | #11 Docker files | Create a NEW "Infrastructure/build" discovery bullet in SPEC-adversarial-review.md Phase 1 (after line 61) containing `Dockerfile*`, `docker-compose*`, `.env*`, `Makefile`. This category doesn't currently exist in the adversarial-review spec — it must be added, not appended to an existing item. |
 | #12 Replace catch-alls | Replace ALL `etc.`, `or similar`, and `or equivalent` in BOTH specs' agent prompts and discovery lists with adaptive language from the hybrid pattern. This covers map.md AND adversarial-review.md. |
 | #13 Large repos | Add concrete limit: "If the discovered file list exceeds 50 files, pass at most 30 file paths to each reviewer agent. Group remaining files by directory and pass directory-level summaries instead." |
-| #15 Tree heuristic | Add to structure-mapper: "Limit directory tree to 3 levels deep, ~30 entries max. For monorepos, show package/workspace boundaries and note the count of sub-packages." Also update SPEC-map.md Edge Cases table (line 411) from "2 levels deep" to "3 levels deep" to match. |
-| #16 Import detection | Add to incremental update section: "To detect changed imports, check if the diff for each modified file includes changes to lines matching the language-appropriate import patterns from the dependency-mapper. If the language is unknown, treat any change in the first 50 lines of a source file as a potential import change." |
+| #15 Tree heuristic | Add to structure-mapper agent prompt: "Limit directory tree to 3 levels deep, ~30 entries max. For monorepos, show package/workspace boundaries and note the count of sub-packages." Also update SPEC-map.md Edge Cases table: change "Limit directory tree to 2 levels deep" (line 411) to "3 levels deep" AND change "Limit to 2 levels of nesting" for monorepos (line 408) to "3 levels" to keep both consistent. |
+| #16 Import detection | Add to SPEC-map.md's "Diff-Aware Scoping Logic" section (after line 400, near the `git diff -G` regex): "For languages not covered by the regex heuristic, detect changed imports by checking if the diff for each modified file includes changes to lines matching the language-appropriate import patterns identified during the initial mapping. If the language is unknown, treat any change in the first 50 lines of a source file as a potential import change." |
 | #17 BDD generalization | Replace BOTH BDD-specific bullets in SPEC-adversarial-review.md coverage-reviewer prompt (lines 152 and 154: "Gherkin scenarios..." and "Test lifecycle patterns that conflict with the BDD framework") with a single generalized bullet: "Check for specialized testing paradigms (BDD/Gherkin `.feature` files, property-based testing, snapshot testing, contract testing) and validate against their framework requirements. For all other tests, evaluate against the project's actual testing patterns." |
-| #18 review-config scope | Add note to map.md: "Note: `/map` intentionally analyzes the full project regardless of `.claude/review-config.md` ignore patterns. The review-config is consumed only by `/adversarial-review`." |
+| #18 review-config scope | Add note to SPEC-map.md near the existing review-config mention (line 480, in "Updated `/adversarial-review` Integration"): "Note: `/map` intentionally analyzes the full project regardless of `.claude/review-config.md` ignore patterns. The review-config is consumed only by `/adversarial-review`." This note should also appear in the regenerated `commands/map.md` near its error handling section. |
 
 ---
 
