@@ -1,0 +1,10 @@
+{
+  "name": "project-tools",
+  "description": "Project mapping and adversarial review commands for Claude Code — polyglot-adaptive, works on any codebase",
+  "version": "1.0.0",
+  "author": {
+    "name": "Matthew Belchak"
+  },
+  "license": "MIT",
+  "keywords": ["architecture", "review", "mapping", "polyglot", "project-tools"]
+}
