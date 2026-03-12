@@ -105,35 +105,44 @@ Both command files use the **same** example sets (eliminating cross-file alignme
 
 ### Group 1: Adaptive Discovery Pattern (findings #3, #4, #5, #6)
 
-Apply the hybrid adaptive pattern (above) to all file/pattern lists in both command files and both specs. This is the core change.
+Apply the hybrid adaptive pattern (above) to all file/pattern lists in both command files and both specs. This is the core change. Individual findings:
+
+| Finding | What's wrong | Where to fix |
+|---------|-------------|--------------|
+| #3 Manifest lists incomplete | Both specs list only ~6 manifests, missing PHP (`composer.json`), Elixir (`mix.exs`), Scala (`build.sbt`), Haskell (`*.cabal`), etc. | Replace manifest lists in both specs with the "Manifests" adaptive block above |
+| #4 Linter/config lists JS-heavy | `adversarial-review` lists 5 JS/TS configs vs 1-2 per other ecosystem. `map.md` convention-scanner similarly biased. | Replace config lists in both specs with the "Config/linters" adaptive block above |
+| #5 Test patterns biased | Neither spec mentions Perl `t/*.t`, Elixir `*_test.exs`, Haskell `*Spec.hs`, PHP `*Test.php`. `map.md` has `*.*` globs that miss extensionless files. | Replace test pattern lists in both specs with the "Test patterns" adaptive block. Also replace ALL `*.*` test globs (e.g., `tests/**/*.*`) with `**/*` — this applies to the structure-mapper agent prompt's test globs AND the embedded command file. |
+| #6 Import patterns miss languages | `map.md` dependency-mapper step 1 says "Grep for import/require/use/include" — a single vague line covering only ~4 patterns. | Replace the dependency-mapper agent prompt's step 1 with the full "Import patterns" adaptive block above. This is the most critical change for polyglot support. |
+
+Additionally: replace ALL `etc.`, `or similar`, and `or equivalent` catch-alls in BOTH specs with the appropriate adaptive instruction from the hybrid pattern. This includes instances in SPEC-adversarial-review.md's Phase 1 discovery list (lines 56-61) and SPEC-map.md's agent prompts (lines 291-362).
 
 ### Group 2: Cross-File Alignment (findings #1, #2, #8, #9, #14)
 
 | Finding | Fix |
 |---------|-----|
-| #1 CI globs | Both files adopt `**/*` (no extension requirement). Remove `*.*` patterns. |
+| #1 CI globs | Both files adopt `**/*` (no extension requirement). Remove ALL `*.*` glob patterns — this includes CI globs AND test file globs (e.g., `tests/**/*.*` → `tests/**/*`). Search both specs and both embedded command files for every instance. |
 | #2 Section naming | `map.md` spec gets explicit heading table: `deps` → `## Dependencies`, `impact` → `## Change Impact Map`. `adversarial-review.md` references "Change Impact Map" (matching map.md spec's existing heading). |
-| #8 src/ missing | Add `src/` to adversarial-review.md source directory list. Rephrase: "Do not assume `src/` is the only source directory." |
-| #9 subagent_type | Add `subagent_type: "general-purpose"` to Phase 2 agent launch instructions in adversarial-review.md. |
+| #8 Source discovery too narrow | Replace the hardcoded `src/**/*` glob in SPEC-adversarial-review.md Phase 1 discovery (line 61) with the full adaptive source directory pattern from the "Source directories" section above. `src/` is already mentioned — the problem is it's the ONLY directory listed. The adaptive pattern adds `lib/`, `app/`, `cmd/`, etc. plus the adapt instruction. |
+| #9 subagent_type | Add `subagent_type: "general-purpose"` to Phase 2 agent launch instructions in SPEC-adversarial-review.md (line 86). This propagates to the command file during regeneration in step 6. |
 | #14 AI assistant files | Both files adopt the same comprehensive list (see AI assistant instructions in the adaptive pattern above). |
 
 ### Group 3: Structural Gaps (findings #7, #10)
 
 | Finding | Fix |
 |---------|-----|
-| #7 --diff fallback | Add explicit warning when falling back to `HEAD~1`: "No valid `/map` baseline found. Diffing against HEAD~1 only. Consider running `/map` first for a comprehensive baseline." |
+| #7 --diff fallback | Add explicit warning when falling back to `HEAD~1`: "No valid `/map` baseline found. Diffing against HEAD~1 only. Consider running `/map` first for a comprehensive baseline." Insert this warning in two locations in SPEC-adversarial-review.md: the Phase 1 `--diff` behavior (line 67) and the "Diff-Aware Review" section (line 306). |
 | #10 Error handling | Add error handling section to adversarial-review.md covering: git unavailable (skip `--diff` with warning), shallow clones (warn about limited diff history), non-git repos (proceed without diff capability). Mirror map.md's error handling approach. |
 
 ### Group 4: Minor Fixes (findings #11–#18)
 
 | Finding | Fix |
 |---------|-----|
-| #11 Docker files | Add `Dockerfile*`, `docker-compose*`, `.env*` to adversarial-review.md discovery (infrastructure/build section). |
-| #12 Replace `etc.` | Replace all `etc.` in map.md agent prompts with adaptive language from the hybrid pattern. |
+| #11 Docker files | Create a NEW "Infrastructure/build" discovery bullet in SPEC-adversarial-review.md Phase 1 (after line 61) containing `Dockerfile*`, `docker-compose*`, `.env*`, `Makefile`. This category doesn't currently exist in the adversarial-review spec — it must be added, not appended to an existing item. |
+| #12 Replace catch-alls | Replace ALL `etc.`, `or similar`, and `or equivalent` in BOTH specs' agent prompts and discovery lists with adaptive language from the hybrid pattern. This covers map.md AND adversarial-review.md. |
 | #13 Large repos | Add concrete limit: "If the discovered file list exceeds 50 files, pass at most 30 file paths to each reviewer agent. Group remaining files by directory and pass directory-level summaries instead." |
-| #15 Tree heuristic | Add to structure-mapper: "Limit directory tree to 3 levels deep, ~30 entries max. For monorepos, show package/workspace boundaries and note the count of sub-packages." |
+| #15 Tree heuristic | Add to structure-mapper: "Limit directory tree to 3 levels deep, ~30 entries max. For monorepos, show package/workspace boundaries and note the count of sub-packages." Also update SPEC-map.md Edge Cases table (line 411) from "2 levels deep" to "3 levels deep" to match. |
 | #16 Import detection | Add to incremental update section: "To detect changed imports, check if the diff for each modified file includes changes to lines matching the language-appropriate import patterns from the dependency-mapper. If the language is unknown, treat any change in the first 50 lines of a source file as a potential import change." |
-| #17 BDD generalization | Replace BDD-specific callout with: "Check for specialized testing paradigms (BDD/Gherkin `.feature` files, property-based testing, snapshot testing, contract testing) and validate against their framework requirements. For all other tests, evaluate against the project's actual testing patterns." |
+| #17 BDD generalization | Replace BOTH BDD-specific bullets in SPEC-adversarial-review.md coverage-reviewer prompt (lines 152 and 154: "Gherkin scenarios..." and "Test lifecycle patterns that conflict with the BDD framework") with a single generalized bullet: "Check for specialized testing paradigms (BDD/Gherkin `.feature` files, property-based testing, snapshot testing, contract testing) and validate against their framework requirements. For all other tests, evaluate against the project's actual testing patterns." |
 | #18 review-config scope | Add note to map.md: "Note: `/map` intentionally analyzes the full project regardless of `.claude/review-config.md` ignore patterns. The review-config is consumed only by `/adversarial-review`." |
 
 ---
@@ -146,7 +155,7 @@ Apply the hybrid adaptive pattern (above) to all file/pattern lists in both comm
 
 **F4: Stale specs vs. partially-fixed commands** — Implementation starts by reading current command files, incorporating their existing fixes into the spec updates, then regenerating commands from the updated specs. No fixes are lost.
 
-**F5: Plugin vs. user-command precedence** — After installing the plugin, delete the old files from `~/.claude/commands/` to avoid shadowing conflicts. Verify Claude Code loads plugin commands correctly.
+**F5: Plugin vs. user-command precedence** — Install the plugin first, verify commands load correctly, THEN delete old files from `~/.claude/commands/`. This ordering ensures the user always has working commands — old commands remain available until the plugin is confirmed working (implementation steps 7→8→9).
 
 **F7: Large repo context overflow** — Concrete limit added: 30 file paths per reviewer agent, directory-level summaries for the rest (see finding #13 fix).
 
@@ -182,15 +191,16 @@ Apply the hybrid adaptive pattern (above) to all file/pattern lists in both comm
 
 ## Implementation Order
 
-1. Set up plugin structure (`.claude-plugin/plugin.json`, directory layout)
-2. Move existing specs from repo root to `docs/specs/`
-3. Update SPEC-map.md with all applicable fixes (Groups 1–4) + failure mitigations
-4. Update SPEC-adversarial-review.md with all applicable fixes (Groups 1–4) + failure mitigations
-5. Regenerate `commands/map.md` from updated SPEC-map.md
-6. Regenerate `commands/adversarial-review.md` from updated SPEC-adversarial-review.md
-7. Delete old files from `~/.claude/commands/`
-8. Install plugin via `claude plugins install`
-9. Verify both commands work in a test project
+1. **Scaffold plugin structure** — create `.claude-plugin/` and `commands/` directories, write `plugin.json`, create `.gitignore`, `LICENSE` (MIT), and `README.md` (these files don't exist yet)
+2. **Move existing specs** from repo root to `docs/specs/`
+3. **Update SPEC-map.md** with all applicable fixes (Groups 1–4) + failure mitigations. Also update the "File Locations" table to reflect plugin-based paths (`commands/map.md` in the plugin repo) instead of `~/.claude/commands/map.md`.
+4. **Update SPEC-adversarial-review.md** with all applicable fixes (Groups 1–4) + failure mitigations. Also update the "File Locations" table to reflect plugin-based paths.
+5. **Regenerate `commands/map.md`** from updated SPEC-map.md's embedded "Command File" section
+6. **Regenerate `commands/adversarial-review.md`** from updated SPEC-adversarial-review.md's embedded command file
+7. **Install plugin** via `claude plugins install` from the repo (verified: `claude plugins install` works — tested with superpowers plugin in this session)
+8. **Verify both commands load** from the plugin in a test project
+9. **Delete old files** from `~/.claude/commands/map.md` and `~/.claude/commands/adversarial-review.md` (only after step 8 confirms the plugin works)
+10. **Final verification** — run `/map` and `/adversarial-review` in a test project to confirm end-to-end functionality
 
 ---
 
