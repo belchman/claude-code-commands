@@ -53,12 +53,13 @@ Before launching any agents, the orchestrator must understand the project. Steps
    - If it does not exist: proceed with defaults.
 
 3. **Auto-discover project files** (regardless of whether ARCHITECTURE.md exists):
-   - Project instruction files: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `COPILOT.md`, or similar
+   - Project instruction files: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `COPILOT.md`, `CURSOR.md`, `AIDER.md`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.github/copilot-instructions.md`, or any root-level markdown or dotfile that appears to contain AI assistant instructions
    - Specs and plans: glob for `*.md` in root — any file that looks like a specification, PRD, plan, or architecture doc
-   - Package manifests: `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `Gemfile`, `pom.xml`, or equivalent
-   - Project config: `tsconfig.json`, `vitest.config.ts`, `jest.config.*`, `webpack.config.*`, `.eslintrc.*`, or equivalent
-   - Hook scripts and CI config: glob `scripts/**/*`, `.github/**/*`, or similar automation
-   - Source and tests: glob `src/**/*` and `tests/**/*` (or `test/**/*`, `spec/**/*`, `__tests__/**/*`)
+   - Package manifests (examples, not exhaustive): `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `mix.exs`, `build.sbt`. Also check the project root for any other build, package, or dependency files specific to the detected language.
+   - Project config (examples, not exhaustive): `.eslintrc.*` (JS), `rustfmt.toml` (Rust), `.rubocop.yml` (Ruby), `mypy.ini` (Python), `.golangci.yml` (Go), `.formatter.exs` (Elixir). Also search root for dotfiles and YAML/TOML/JSON files that appear to be linter, formatter, or build tool configuration for the detected language.
+   - Hook scripts and CI config: glob `scripts/**/*`, `.github/workflows/**/*`, `.gitlab-ci.yml`, `.circleci/**/*`, `Jenkinsfile*`, `.buildkite/**/*`, `.travis.yml`, `azure-pipelines.yml`, `bitbucket-pipelines.yml`. Check for any other CI/automation configuration present.
+   - Source and tests: Run `ls` on the project root and check the manifest to discover actual source and test directories. Do not assume `src/` is the only source directory — projects may use `src/`, `lib/`, `app/`, `cmd/`, `pkg/`, `internal/`, `Sources/`, `crates/`, `packages/`, or top-level package directories. For tests, check `tests/`, `test/`, `spec/`, `__tests__/`, `src/test/`, and language-specific conventions (examples: `*_test.go`, `test_*.py`, `*_spec.rb`, `t/*.t`). For any other language, check for its test naming conventions. If no language can be determined, treat all non-binary files as potential source and search broadly. Note the uncertainty in the output.
+   - Infrastructure and build: `Dockerfile*`, `docker-compose*`, `.env*`, `Makefile`
 
 4. **If user passed specific files**: those become the primary review targets. Still discover surrounding context so reviewers understand the full picture.
 
@@ -204,7 +205,7 @@ You are an **adversarial product manager**. You have a list of findings from a t
 - If something is missing, add it in the most logical location near related content.
 - Match the existing style, formatting, and voice of each file.
 
-**Rules for project instruction files (CLAUDE.md, AGENTS.md, etc.):**
+**Rules for project instruction files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `COPILOT.md`, `CURSOR.md`, `AIDER.md`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.github/copilot-instructions.md`, or any root-level markdown or dotfile containing AI assistant instructions):**
 - **ONLY ADD content, never remove** unless something is factually wrong or directly contradicts the spec/plan.
 - If a section needs updating, append or clarify — don't rewrite.
 - If nothing needs changing, don't touch it.
@@ -253,7 +254,7 @@ After the PM agent finishes, present a summary:
 - Finding #N: [reason — user chose to skip, out of scope, etc.]
 ```
 
-If any project instruction file (CLAUDE.md, AGENTS.md, etc.) was modified, call it out explicitly so the user can review those changes.
+If any project instruction file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `COPILOT.md`, `CURSOR.md`, `AIDER.md`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.github/copilot-instructions.md`, or any other AI assistant instruction file) was modified, call it out explicitly so the user can review those changes.
 
 Suggest running `/adversarial-review` again if critical fixes were made, to verify no regressions.
 
