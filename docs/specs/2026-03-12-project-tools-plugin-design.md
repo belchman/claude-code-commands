@@ -1,9 +1,9 @@
-# Design: `project-tools` Plugin — Polyglot-Adaptive Claude Code Commands
+# Design: `claude-code-commands` Plugin — Polyglot-Adaptive Claude Code Commands
 
 > **Purpose**: Convert `/map` and `/adversarial-review` from loose user-level commands into an installable Claude Code plugin, applying a hybrid adaptive pattern to make them fully project-agnostic.
 >
-> **Repo**: `~/projects/claude-skills/`
-> **Plugin name**: `project-tools`
+> **Repo**: current working directory
+> **Plugin name**: `claude-code-commands`
 > **Approach**: Hybrid — short example lists + mandatory adaptive fallback (Approach 3)
 
 ---
@@ -23,9 +23,9 @@ These commands should work for **any language**, including uncommon ones (Haskel
 ## Repo Structure
 
 ```
-~/projects/claude-skills/
+<working-directory>/
 ├── .claude-plugin/
-│   └── plugin.json              # Plugin metadata (name: "project-tools")
+│   └── plugin.json              # Plugin metadata (name: "claude-code-commands")
 ├── commands/
 │   ├── map.md                   # /map command (executable)
 │   └── adversarial-review.md    # /adversarial-review command (executable)
@@ -33,7 +33,7 @@ These commands should work for **any language**, including uncommon ones (Haskel
 │   └── specs/
 │       ├── SPEC-map.md                              # Detailed spec (source of truth)
 │       ├── SPEC-adversarial-review.md               # Detailed spec (source of truth)
-│       └── 2026-03-12-project-tools-plugin-design.md # This document
+│       └── 2026-03-12-claude-code-commands-plugin-design.md # This document
 ├── .gitignore
 ├── LICENSE
 └── README.md
@@ -176,14 +176,14 @@ Additionally: replace ALL `etc.`, `or similar`, and `or equivalent` catch-alls i
 `.claude-plugin/plugin.json`:
 ```json
 {
-  "name": "project-tools",
+  "name": "claude-code-commands",
   "description": "Project mapping and adversarial review commands for Claude Code — polyglot-adaptive, works on any codebase",
   "version": "1.0.0",
   "author": {
     "name": "Matthew Belchak"
   },
   "license": "MIT",
-  "keywords": ["architecture", "review", "mapping", "polyglot", "project-tools"]
+  "keywords": ["architecture", "review", "mapping", "polyglot", "claude-code-commands"]
 }
 ```
 

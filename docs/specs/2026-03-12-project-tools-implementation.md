@@ -1,4 +1,4 @@
-# project-tools Plugin Implementation Plan
+# claude-code-commands Plugin Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Claude Code plugin format (`.claude-plugin/plugin.json`), markdown command files, git
 
-**Spec:** `docs/specs/2026-03-12-project-tools-plugin-design.md`
+**Spec:** `docs/specs/2026-03-12-claude-code-commands-plugin-design.md`
 
 ---
 
@@ -42,14 +42,14 @@
 
 ```json
 {
-  "name": "project-tools",
+  "name": "claude-code-commands",
   "description": "Project mapping and adversarial review commands for Claude Code — polyglot-adaptive, works on any codebase",
   "version": "1.0.0",
   "author": {
     "name": "Matthew Belchak"
   },
   "license": "MIT",
-  "keywords": ["architecture", "review", "mapping", "polyglot", "project-tools"]
+  "keywords": ["architecture", "review", "mapping", "polyglot", "claude-code-commands"]
 }
 ```
 
@@ -68,7 +68,7 @@ Standard MIT license with copyright `Matthew Belchak`.
 - [ ] **Step 4: Create `README.md`**
 
 ```markdown
-# project-tools
+# claude-code-commands
 
 Polyglot-adaptive project mapping and adversarial review commands for Claude Code.
 
@@ -279,8 +279,8 @@ Also add this note to the embedded command file's error handling section.
 - [ ] **Step 6: Update File Locations table**
 
 Change the File Locations table (around line 488) to reflect plugin-based paths:
-- `/map` command: `commands/map.md` (in the project-tools plugin repo)
-- `/adversarial-review` command: `commands/adversarial-review.md` (in the project-tools plugin repo)
+- `/map` command: `commands/map.md` (in the claude-code-commands plugin repo)
+- `/adversarial-review` command: `commands/adversarial-review.md` (in the claude-code-commands plugin repo)
 
 - [ ] **Step 7: Commit Groups 2–4 fixes for SPEC-map.md**
 
@@ -466,7 +466,7 @@ With:
 - [ ] **Step 7: Update File Locations table**
 
 Change the File Locations table (around line 375) to reflect plugin-based paths:
-- `/adversarial-review` command: `commands/adversarial-review.md` (in the project-tools plugin repo)
+- `/adversarial-review` command: `commands/adversarial-review.md` (in the claude-code-commands plugin repo)
 
 - [ ] **Step 8: Commit Groups 2–4 fixes for SPEC-adversarial-review.md**
 
@@ -567,16 +567,11 @@ git commit -m "feat: generate commands/adversarial-review.md from updated spec"
 - [ ] **Step 1: Install the plugin**
 
 ```bash
-cd ~/projects/claude-skills
-claude plugins install .
+git clone https://github.com/belchman/claude-code-commands
+claude plugins install ./claude-code-commands
 ```
 
-If this fails, try:
-```bash
-claude plugins install ~/projects/claude-skills
-```
-
-Expected: "Successfully installed plugin: project-tools"
+Expected: "Successfully installed plugin: claude-code-commands"
 
 - [ ] **Step 2: Verify plugin is in settings**
 
@@ -584,7 +579,7 @@ Expected: "Successfully installed plugin: project-tools"
 cat ~/.claude/settings.json
 ```
 
-Expected: `"project-tools@..."` appears in `enabledPlugins`.
+Expected: `"claude-code-commands@..."` appears in `enabledPlugins`.
 
 - [ ] **Step 3: Verify commands are available**
 
