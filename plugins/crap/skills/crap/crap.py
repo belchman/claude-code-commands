@@ -856,11 +856,20 @@ def cmd_score(args: argparse.Namespace) -> int:
                          for r in rows)
     any_hit = any(r["crap"] > args.threshold for r in rows)
 
+    above_threshold = sum(1 for r in rows if r["crap"] > args.threshold)
+    # Savoia's project-level rule: >5% of methods above threshold = project is crappy.
+    # Denominator is all methods (functions filtered by CRAP_max prefilter are guaranteed
+    # below threshold, so they count as "not above").
+    project_pct = (above_threshold / len(functions) * 100.0) if functions else 0.0
+    project_crappy = project_pct > 5.0
+
     summary = {
         "threshold": args.threshold,
         "total_functions": len(functions),
         "survivors": len(survivors),
-        "above_threshold": sum(1 for r in rows if r["crap"] > args.threshold),
+        "above_threshold": above_threshold,
+        "project_pct_above_threshold": round(project_pct, 2),
+        "project_crappy": project_crappy,
         "regressions": sum(1 for r in rows if r["tag"] == "regressed"
                            and r["crap"] > args.threshold),
         "new_above_threshold": sum(1 for r in rows if r["tag"] == "new"
@@ -871,6 +880,9 @@ def cmd_score(args: argparse.Namespace) -> int:
 
     eprint(f"crap: {summary['above_threshold']}/{summary['survivors']} over threshold; "
            f"{summary['regressions']} regressed, {summary['new_above_threshold']} new")
+    verdict = "CRAPPY" if project_crappy else "clean"
+    eprint(f"crap: {project_pct:.1f}% of {len(functions)} methods above CRAP {args.threshold} "
+           f"— project is {verdict} by Savoia's 5% rule")
 
     if any_regression:
         return 2

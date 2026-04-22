@@ -17,6 +17,8 @@ eff_cov  = line_cov × mutation_kill_rate
 
 `cc` is cyclomatic complexity. `eff_cov` is line coverage multiplied by mutation-kill rate so that code "executed by tests but not actually verified" doesn't count as covered. A function gets its CRAP down by (a) being simpler or (b) being thoroughly tested.
 
+**Deviation from Savoia's original.** Savoia specified *basis path coverage*. This skill substitutes `line_cov × mutation_kill_rate`, which directly addresses the weakness Savoia himself flagged: *"[CRAP] cannot detect great code coverage and lousy tests."* Mutation kill rate exposes that case — lousy tests fail to kill mutants, so `eff_cov` drops even when line coverage looks fine. The 30 threshold and the 5%-of-methods project rule are unchanged from Savoia's Artima post.
+
 Load-on-demand references (read only when needed):
 - `detectors.md` — language → coverage/mutation tool matrix
 - `refactor-playbook.md` — per-language refactor patterns
@@ -144,7 +146,9 @@ Omit `--churn-window` and pass `--no-churn` if `churn_weight: false`. Omit `--ba
 
 ### 8. Brief the user
 
-Echo the table. Add one short summary line: N functions above threshold, K regressions, worst offender.
+Echo the table. Add two short summary lines from `crap.py score`'s stderr:
+- N functions above threshold, K regressions, M new above threshold, worst offender.
+- Savoia's project rule: X% of methods above CRAP threshold — project is **CRAPPY** (>5%) or **clean** (≤5%).
 
 If `--set-baseline` was passed, `crap.py` will have written `.crap-baseline.json`; stop here.
 
@@ -162,13 +166,20 @@ test_axis  = cc² × (1 − eff_cov)³ − cc² × (1 − line_cov)³
 If `cc_axis > test_axis` → refactor. Else → tests.
 
 - **Refactor path**: Read the function. Load the matching section of `refactor-playbook.md` for the file's language. Draft a unified diff plus a one-sentence rationale.
+
+  **Tests-first guardrail (Savoia's own advice).** If the scored row shows `eff_cov < 80%`, do not propose the refactor on its own. First draft *characterization tests* that pin down the function's current behavior — one test per distinct branch, plus the mutants in `survived_mutants` as targeted cases. The characterization suite is the safety net the refactor leans on. Present both the characterization tests and the refactor diff together, make clear which runs first, and recommend applying the tests alone first if the user is unsure.
+
+  If `eff_cov >= 80%`, propose the refactor directly — the existing tests are a sufficient safety net.
+
 - **Tests path**: Read the function and the `survived_mutants` list from `/tmp/mutation.json`. Draft new test cases that would kill each surviving mutant (hypothesis/fast-check/proptest when available, else plain cases).
 
 Then use `AskUserQuestion`:
 - Question: "Apply the proposed change to <file>:<fn>?"
-- Options: `apply refactor` / `apply tests` / `refine` / `skip`
+- Options (refactor path, `eff_cov < 80%`): `apply characterization tests first` / `apply tests + refactor together` / `refine` / `skip`
+- Options (refactor path, `eff_cov >= 80%`): `apply refactor` / `refine` / `skip`
+- Options (tests path): `apply tests` / `refine` / `skip`
 
-On `apply`, write the change with Edit/Write and remind the user to re-run their test suite.
+On `apply`, write the change with Edit/Write and remind the user to re-run their test suite. On the `apply characterization tests first` branch, stop after writing the tests and instruct the user to re-run `/crap` once they've re-run their suite — the refactor diff will be re-proposed on top of the now-safer baseline.
 
 ## Notes
 
