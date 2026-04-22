@@ -15,6 +15,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 HERE = Path(__file__).resolve().parent
 # Import via the fully-qualified package path so mutation tools (e.g. mutmut 3)
@@ -1041,6 +1042,364 @@ class TestAntiMutation(unittest.TestCase):
             data = json.loads(so.read_text())
             self.assertIn("summary", data)
             self.assertIn("rows", data)
+
+
+class TestCmdLizard(unittest.TestCase):
+    """Cover cmd_lizard via subprocess.run mocking — no real lizard invocation."""
+
+    def _proc(self, returncode=0, stdout="", stderr=""):
+        m = MagicMock()
+        m.returncode = returncode
+        m.stdout = stdout
+        m.stderr = stderr
+        return m
+
+    def test_empty_file_list_returns_zero(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "fns.json"
+            with redirect_stderr(io.StringIO()):
+                rc = crap.cmd_lizard(_ns(files=[], output=str(out)))
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(out.read_text()), [])
+
+    def test_lizard_success_parses_and_emits(self):
+        csv = ('NLOC,CCN,token,PARAM,length,location\n'
+               '2,1,5,0,2,"f@1-2@a.py"\n')
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "fns.json"
+            with patch("subprocess.run", return_value=self._proc(
+                    returncode=0, stdout=csv)):
+                rc = crap.cmd_lizard(_ns(files=["a.py"], output=str(out)))
+            self.assertEqual(rc, 0)
+            data = json.loads(out.read_text())
+            self.assertEqual(data[0]["name"], "f")
+
+    def test_lizard_not_installed(self):
+        with patch("subprocess.run", return_value=self._proc(
+                returncode=1,
+                stderr="/usr/bin/python: No module named lizard")):
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                rc = crap.cmd_lizard(_ns(files=["a.py"], output=None))
+            self.assertEqual(rc, 3)
+            self.assertIn("pip install lizard", buf.getvalue())
+
+    def test_lizard_empty_stdout_is_error(self):
+        with patch("subprocess.run", return_value=self._proc(
+                returncode=0, stdout="", stderr="weird")):
+            with redirect_stderr(io.StringIO()):
+                rc = crap.cmd_lizard(_ns(files=["a.py"], output=None))
+            self.assertEqual(rc, 3)
+
+    def test_lizard_python_missing(self):
+        with patch("subprocess.run", side_effect=FileNotFoundError()):
+            with redirect_stderr(io.StringIO()):
+                rc = crap.cmd_lizard(_ns(files=["a.py"], output=None))
+            self.assertEqual(rc, 3)
+
+
+class TestMoreAntiMutation(unittest.TestCase):
+    """Second anti-mutation wave — targets the larger population of
+    surviving mutants in the adapters and parser.
+    """
+
+    # ---- _read_arg_signature line-reading branches ----
+
+    def test_arg_signature_line_offset_respects_start_line(self):
+        """Kills enumerate(start=1) → start=2 and continue → break mutants."""
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write("# garbage line 1\n# garbage line 2\n")
+            f.write("def foo(a, b):\n    pass\n")  # starts at line 3
+            path = f.name
+        try:
+            self.assertEqual(crap._read_arg_signature(path, 3, 2), "a,b")
+        finally:
+            os.unlink(path)
+
+    def test_arg_signature_break_on_mismatched_closing(self):
+        """Kills 'elif ch == ")"' → 'elif ch == "XX)XX"' mutation — the
+        paren-depth tracker must actually notice the closing paren.
+        """
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write("def foo(a, b=(1, 2), c=3):\n    pass\n")
+            path = f.name
+        try:
+            sig = crap._read_arg_signature(path, 1, 3)
+            self.assertEqual(sig, "a,b,c")
+        finally:
+            os.unlink(path)
+
+    def test_arg_signature_finds_first_paren_not_last(self):
+        """Kills blob.find('(') → blob.rfind('(') — with multiple '(' in
+        the visible window, rfind would land on a nested default instead
+        of the function's own arg list.
+        """
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write("def foo(a, b=tuple((1,2,3))):\n    pass\n")
+            path = f.name
+        try:
+            sig = crap._read_arg_signature(path, 1, 2)
+            self.assertEqual(sig, "a,b")
+        finally:
+            os.unlink(path)
+
+    # ---- _render_markdown literal strings ----
+
+    def test_render_markdown_all_header_strings_exact(self):
+        """Kills the remaining 'X → XXXX' mutations in the headers list."""
+        row = {"file": "a.py", "start_line": 1, "name": "f", "cc": 1,
+               "line_cov": 1, "mut_kill": 1, "eff_cov": 1,
+               "churn": 0, "crap": 1.0, "delta": None, "tag": "new"}
+        out = crap._render_markdown([row], threshold=30.0)
+        # Every literal header token must be exactly present
+        for literal in ["file:line", "function", "cc", "cov%", "mut%",
+                        "eff_cov%", "churn", "CRAP", "Δ", "tag"]:
+            self.assertIn(f" {literal} ", out, msg=f"header: {literal!r}")
+
+    def test_render_markdown_delta_none_shows_em_dash(self):
+        row = {"file": "a", "start_line": 1, "name": "f", "cc": 1,
+               "line_cov": 0, "mut_kill": 1, "eff_cov": 0, "churn": 0,
+               "crap": 1.0, "delta": None, "tag": "new"}
+        out = crap._render_markdown([row], threshold=30.0)
+        self.assertIn(" — ", out)
+
+    # ---- mutation adapters: alternate-key lookups ----
+
+    def test_mutmut_accepts_filename_or_file_key(self):
+        """Kills m.get('file') → m.get('filename'|None|'XXfileXX')."""
+        raw = {"mutants": [{"file": "a.py", "line": 3, "status": "killed"}]}
+        out = crap.mutation_from_mutmut(raw)
+        self.assertEqual(out["a.py"]["3"]["killed"], 1)
+
+    def test_mutmut_missing_both_path_keys_skipped(self):
+        raw = {"mutants": [{"line_number": 5, "status": "killed"}]}
+        out = crap.mutation_from_mutmut(raw)
+        self.assertEqual(out, {})
+
+    def test_mutmut_label_fallback_uses_line_marker(self):
+        """Forces the `f"L{line}"` branch when neither name nor source exist."""
+        raw = {"mutants": [{"filename": "a.py", "line_number": 7,
+                            "status": "survived"}]}
+        out = crap.mutation_from_mutmut(raw)
+        self.assertEqual(out["a.py"]["7"]["survived_mutants"], ["L7"])
+
+    def test_cargo_mutants_accepts_lowercase_mutant_key(self):
+        """Kills scen.get('Mutant') or scen.get('mutant') mutants that
+        drop the alternative key.
+        """
+        raw = {"outcomes": [
+            {"scenario": {"mutant": {"file": "a.rs", "line": 2}},
+             "summary": "CaughtMutant"}]}
+        out = crap.mutation_from_cargo_mutants(raw)
+        self.assertEqual(out["a.rs"]["2"]["killed"], 1)
+
+    def test_cargo_mutants_missing_scenario_skipped(self):
+        raw = {"outcomes": [{"summary": "CaughtMutant"}]}
+        out = crap.mutation_from_cargo_mutants(raw)
+        self.assertEqual(out, {})
+
+    def test_cargo_mutants_timeout_counted_as_killed(self):
+        """The `"caught" or "timeout" → killed` logic needs exercising."""
+        raw = {"outcomes": [
+            {"scenario": {"Mutant": {"file": "a.rs", "line": 1}},
+             "summary": "Timeout(x)"}]}
+        out = crap.mutation_from_cargo_mutants(raw)
+        self.assertEqual(out["a.rs"]["1"]["killed"], 1)
+
+    def test_cargo_mutants_other_summary_neither_killed_nor_survived(self):
+        """Characterization: 'Unviable' is mapped to status='skip', which
+        means the bucket is created but neither counter increments."""
+        raw = {"outcomes": [
+            {"scenario": {"Mutant": {"file": "a.rs", "line": 1}},
+             "summary": "Unviable"}]}
+        out = crap.mutation_from_cargo_mutants(raw)
+        self.assertEqual(out["a.rs"]["1"]["killed"], 0)
+        self.assertEqual(out["a.rs"]["1"]["survived"], 0)
+
+    def test_cargo_mutants_label_prefers_function_name(self):
+        raw = {"outcomes": [
+            {"scenario": {"Mutant": {"file": "a.rs", "line": 1,
+                                     "function": "foo::bar"}},
+             "summary": "MissedMutant"}]}
+        out = crap.mutation_from_cargo_mutants(raw)
+        self.assertEqual(out["a.rs"]["1"]["survived_mutants"], ["foo::bar"])
+
+    def test_pitest_default_values_fire_when_elements_missing(self):
+        """Kills mutations like `or ""` → `or "XXXX"` in findtext fallbacks —
+        need an XML where the element is absent.
+        """
+        xml = """<mutations>
+  <mutation detected="true"><sourceFile>A.java</sourceFile>
+    <lineNumber>5</lineNumber></mutation>
+</mutations>"""
+        out = crap.mutation_from_pitest(xml)
+        # mutatedClass missing → path falls back to sourceFile
+        self.assertEqual(out["A.java"]["5"]["killed"], 1)
+
+    def test_pitest_missing_source_or_line_skipped(self):
+        xml = ('<mutations><mutation detected="true">'
+               '<lineNumber>5</lineNumber></mutation></mutations>')
+        self.assertEqual(crap.mutation_from_pitest(xml), {})
+
+    def test_pitest_label_fallback_to_line_marker(self):
+        xml = ('<mutations><mutation detected="false">'
+               '<sourceFile>A.java</sourceFile><lineNumber>3</lineNumber>'
+               '</mutation></mutations>')
+        out = crap.mutation_from_pitest(xml)
+        self.assertEqual(out["A.java"]["3"]["survived_mutants"], ["L3"])
+
+    def test_pitest_nondigit_line_skipped(self):
+        xml = ('<mutations><mutation detected="true">'
+               '<sourceFile>A.java</sourceFile><lineNumber>xyz</lineNumber>'
+               '</mutation></mutations>')
+        self.assertEqual(crap.mutation_from_pitest(xml), {})
+
+    def test_stryker_description_fallback_when_no_mutator_name(self):
+        raw = {"files": {"a.js": {"mutants": [
+            {"location": {"start": {"line": 9}}, "status": "Survived",
+             "description": "binary-op"}]}}}
+        out = crap.mutation_from_stryker(raw)
+        self.assertEqual(out["a.js"]["9"]["survived_mutants"], ["binary-op"])
+
+    def test_stryker_no_label_uses_line_marker(self):
+        raw = {"files": {"a.js": {"mutants": [
+            {"location": {"start": {"line": 4}}, "status": "Survived"}]}}}
+        out = crap.mutation_from_stryker(raw)
+        self.assertEqual(out["a.js"]["4"]["survived_mutants"], ["L4"])
+
+    # ---- coverage adapters: edge branches ----
+
+    def test_istanbul_skips_files_without_statement_map(self):
+        raw = {"a.js": {"s": {"0": 1}}, "b.js": {"statementMap": {
+            "0": {"start": {"line": 1}}}, "s": {"0": 2}}}
+        out = crap.coverage_from_istanbul(raw)
+        self.assertNotIn("a.js", out)
+        self.assertEqual(out["b.js"]["1"], 2)
+
+    def test_istanbul_statement_without_hit_id_defaults_zero(self):
+        raw = {"a.js": {"statementMap": {"0": {"start": {"line": 3}}},
+                        "s": {}}}
+        out = crap.coverage_from_istanbul(raw)
+        self.assertEqual(out["a.js"]["3"], 0)
+
+    def test_istanbul_bad_start_location_skipped(self):
+        raw = {"a.js": {"statementMap": {"0": {"start": {}}},
+                        "s": {"0": 1}}}
+        out = crap.coverage_from_istanbul(raw)
+        self.assertEqual(out["a.js"], {})
+
+    def test_coveragepy_handles_missing_files_key(self):
+        self.assertEqual(crap.coverage_from_coveragepy({"other": {}}), {})
+
+    def test_gocover_multi_line_span_records_every_line(self):
+        text = "mode: count\npkg/a.go:5.1,9.10 1 4\n"
+        out = crap.coverage_from_gocover(text)
+        self.assertEqual(out["pkg/a.go"]["5"], 4)
+        self.assertEqual(out["pkg/a.go"]["9"], 4)
+
+    def test_cobertura_falls_back_to_name_when_filename_missing(self):
+        """Characterization: `name` attr is used as the path fallback."""
+        xml = ('<coverage><class name="com.x.Foo">'
+               '<line number="1" hits="1"/></class></coverage>')
+        out = crap.coverage_from_cobertura(xml)
+        self.assertEqual(out["com.x.Foo"]["1"], 1)
+
+    def test_cobertura_class_without_any_path_skipped(self):
+        xml = ('<coverage><class><line number="1" hits="1"/></class>'
+               '</coverage>')
+        self.assertEqual(crap.coverage_from_cobertura(xml), {})
+
+    def test_cobertura_line_without_number_skipped(self):
+        xml = ('<coverage><class filename="a.py">'
+               '<line hits="1"/></class></coverage>')
+        out = crap.coverage_from_cobertura(xml)
+        self.assertEqual(out["a.py"], {})
+
+    # ---- _mut_add synonyms ----
+
+    def test_mut_add_detected_status_is_killed(self):
+        dst = {}
+        crap._mut_add(dst, "a.py", 1, "detected")
+        self.assertEqual(dst["a.py"]["1"]["killed"], 1)
+
+    def test_mut_add_alive_and_nocoverage_count_as_survived(self):
+        dst = {}
+        crap._mut_add(dst, "a.py", 1, "alive")
+        crap._mut_add(dst, "a.py", 1, "no_coverage")
+        self.assertEqual(dst["a.py"]["1"]["survived"], 2)
+
+    def test_mut_add_accepts_short_codes(self):
+        dst = {}
+        crap._mut_add(dst, "a.py", 1, "K")
+        crap._mut_add(dst, "a.py", 1, "S", "m")
+        self.assertEqual(dst["a.py"]["1"]["killed"], 1)
+        self.assertEqual(dst["a.py"]["1"]["survived"], 1)
+
+    # ---- last-mile arg-signature edge cases ----
+
+    def test_arg_signature_multi_line_signature(self):
+        """Kills blob = ''.join(lines) → 'XXXX'.join(lines) and depth += 1
+        → depth = 1 mutants. A signature split across multiple lines must
+        be re-joined correctly so the paren-depth tracker sees the real
+        nesting.
+        """
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write("def foo(\n    a,\n    b=(1, 2),\n    c,\n):\n    pass\n")
+            path = f.name
+        try:
+            self.assertEqual(crap._read_arg_signature(path, 1, 3), "a,b,c")
+        finally:
+            os.unlink(path)
+
+    def test_arg_signature_split_equals_limit_one(self):
+        """Kills p.split('=', 1) → p.split('=', 2) / rsplit — default value
+        that itself contains '=' must not leak into the name.
+        """
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write('def foo(a="x=y=z", b="q"):\n    pass\n')
+            path = f.name
+        try:
+            self.assertEqual(crap._read_arg_signature(path, 1, 2), "a,b")
+        finally:
+            os.unlink(path)
+
+    def test_arg_signature_split_colon_preserves_name(self):
+        """Kills p.split(':', 1) mutants: a type annotation that contains
+        ':' (e.g., Dict[str, int] is safe; use a string default with ':').
+        """
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write("def foo(a: 'Dict[str, int]', b: int):\n    pass\n")
+            path = f.name
+        try:
+            sig = crap._read_arg_signature(path, 1, 2)
+            self.assertEqual(sig, "a,b")
+        finally:
+            os.unlink(path)
+
+    def test_arg_signature_nested_depth_greater_than_one(self):
+        """Kills depth += 1 → depth = 1: two levels of nesting inside a
+        default must still match the right outer ')'.
+        """
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write("def foo(a=((1, 2), 3), b):\n    pass\n")
+            path = f.name
+        try:
+            self.assertEqual(crap._read_arg_signature(path, 1, 2), "a,b")
+        finally:
+            os.unlink(path)
+
+    def test_arg_signature_ampersand_is_separator(self):
+        """Kills the replace('&', ' ') mutations — '&' must be treated as a
+        token separator so C-style `int&a` yields name 'a', not 'int&a'.
+        """
+        with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False) as f:
+            # No '::' which would trip the ':' splitter
+            f.write("void foo(int&a, int&b) {\n}\n")
+            path = f.name
+        try:
+            self.assertEqual(crap._read_arg_signature(path, 1, 2), "a,b")
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":
