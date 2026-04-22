@@ -1,0 +1,60 @@
+# .crap.yml — sample config for the /crap skill.
+# Copy to your repo root as `.crap.yml` and edit. All keys are optional;
+# CLI flags override anything set here.
+
+# Minimum CRAP score for a function to be flagged.
+# 30 matches Savoia's original proposal; lower to be stricter.
+threshold: 30
+
+# How many rows to show in the markdown report (ordered by churn-weighted CRAP).
+top_n: 20
+
+# "changed" = only files in the current branch's diff vs `base`.
+# "full"    = whole tree. Slower; use --set-baseline and periodic audits.
+scope: changed
+base: origin/main
+
+# Weight CRAP by how often the file changes (Feathers hotspot heuristic).
+# Formula: CRAP_weighted = CRAP * (1 + log1p(commits_in_window))
+churn_weight: true
+churn_window_days: 90
+
+# Relative to repo root. Set to null to disable the regression gate.
+# Generate/refresh with `/crap --set-baseline` on a clean main.
+baseline: .crap-baseline.json
+
+# Per-function measurement cache. Keyed on sha256(function_bytes).
+# Safe to delete; next run will be slow once.
+cache: .crap-cache
+
+# Globs excluded from lizard's scan AND from coverage/mutation.
+exclude:
+  - "**/migrations/**"
+  - "**/tests/**"
+  - "**/__tests__/**"
+  - "**/test/**"
+  - "**/spec/**"
+  - "**/vendor/**"
+  - "**/node_modules/**"
+  - "**/.venv/**"
+  - "**/build/**"
+  - "**/dist/**"
+
+# Seconds. Mutation runs on the cache-miss set only, so this bounds the longest
+# single mutation run, not total wall time.
+mutation_timeout: 1800
+
+# "auto" lets the mutation tool decide. Set an int to pin.
+parallelism: auto
+
+# Override the test command used during coverage runs. Default: auto-detect
+# from marker files (pytest, npm test, go test, cargo test, mvn test).
+test_command: null
+
+# "auto" picks a tool based on marker files in the repo. Override to force.
+# Options (see detectors.md):
+#   coverage_tool: coveragepy | istanbul | jest | vitest | gocover | lcov |
+#                  cobertura | tarpaulin | normalized
+#   mutation_tool: mutmut | stryker | cargo-mutants | pitest | normalized
+coverage_tool: auto
+mutation_tool: auto

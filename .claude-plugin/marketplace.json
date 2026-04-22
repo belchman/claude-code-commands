@@ -1,17 +1,37 @@
 {
-  "name": "project-tools-marketplace",
-  "description": "Marketplace for project-tools plugin",
+  "name": "claude-code-commands",
+  "metadata": {
+    "description": "A marketplace of individually-installable commands and skills for Claude Code."
+  },
   "owner": {
-    "name": "Matthew Belchak"
+    "name": "belchman"
   },
   "plugins": [
     {
-      "name": "project-tools",
-      "description": "Project mapping and adversarial review commands for Claude Code — polyglot-adaptive, works on any codebase",
+      "name": "map",
+      "description": "Generate or update ARCHITECTURE.md — a living map of a project's structure, dependencies, and high-coupling zones.",
       "version": "1.0.0",
-      "source": "./",
+      "source": "./plugins/map",
       "author": {
-        "name": "Matthew Belchak"
+        "name": "belchman"
+      }
+    },
+    {
+      "name": "adversarial-review",
+      "description": "Three parallel reviewer agents find contradictions, config gaps, and coverage holes — then fix what you approve.",
+      "version": "1.0.0",
+      "source": "./plugins/adversarial-review",
+      "author": {
+        "name": "belchman"
+      }
+    },
+    {
+      "name": "crap",
+      "description": "Rank functions by CRAP score (complexity × lack of real test coverage), then propose a refactor or missing tests for the worst offender.",
+      "version": "1.0.0",
+      "source": "./plugins/crap",
+      "author": {
+        "name": "belchman"
       }
     }
   ]
