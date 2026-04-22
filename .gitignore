@@ -1,3 +1,15 @@
 .DS_Store
 *.swp
 *~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# /crap pipeline artifacts
+.coverage
+.crap-cache/
+.crap-baseline.json
+mutants/

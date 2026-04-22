@@ -708,6 +708,157 @@ def load_baseline(path: str | None) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _measure_one(fn: dict[str, Any], coverage: dict[str, Any],
+                 mutation: dict[str, Any], cached_results: dict[str, dict[str, Any]],
+                 cache_dir: Path | None, toolchain_tag: str
+                 ) -> tuple[float, float, list[str]]:
+    """Return (line_cov_frac, mut_kill_frac, survived_mutants) for a survivor.
+
+    Uses the cache when available; otherwise slices coverage/mutation and
+    writes the cache. Mutates fn to set "_hash".
+    """
+    h = fn.get("_hash") or function_hash(fn, toolchain_tag)
+    fn["_hash"] = h
+    cached = cached_results.get(h)
+    if cached:
+        return (
+            float(cached.get("line_cov", 0.0)),
+            float(cached.get("mut_kill", 1.0)),
+            list(cached.get("survived_mutants") or []),
+        )
+    file, start, end = fn["file"], int(fn["start_line"]), int(fn["end_line"])
+    hit, total = _slice_coverage(coverage, file, start, end)
+    line_cov_frac = (hit / total) if total > 0 else 0.0
+    killed, survived, survived_mutants = _slice_mutation(mutation, file, start, end)
+    mut_total = killed + survived
+    # No mutation data → treat as 1.0 (don't punish for a tool that wasn't run).
+    mut_kill_frac = (killed / mut_total) if mut_total > 0 else 1.0
+    # Only cache when we actually measured something. Caching a "no data"
+    # default would shadow a real measurement on the next run.
+    if cache_dir is not None and (total > 0 or mut_total > 0):
+        try:
+            with open(cache_dir / (h + ".json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "line_cov": line_cov_frac,
+                    "mut_kill": mut_kill_frac,
+                    "survived_mutants": survived_mutants,
+                }, fh)
+        except OSError:
+            pass
+    return line_cov_frac, mut_kill_frac, survived_mutants
+
+
+def _baseline_tag(base_score: float, prev: dict[str, Any] | None
+                  ) -> tuple[str, float | None]:
+    if prev is None:
+        return "new", None
+    delta = base_score - float(prev.get("crap", 0.0))
+    if delta > 0.5:
+        return "regressed", delta
+    if delta < -0.5:
+        return "improved", delta
+    return "same", delta
+
+
+def _score_one(fn: dict[str, Any], coverage: dict[str, Any],
+               mutation: dict[str, Any], cached_results: dict[str, dict[str, Any]],
+               cache_dir: Path | None, toolchain_tag: str,
+               baseline_map: dict[str, dict[str, Any]],
+               no_churn: bool, churn_window: int) -> dict[str, Any]:
+    cc = int(fn["cc"])
+    line_cov, mut_kill, survived_mutants = _measure_one(
+        fn, coverage, mutation, cached_results, cache_dir, toolchain_tag)
+    eff_cov = line_cov * mut_kill
+    base_score = crap_score(cc, eff_cov * 100.0)
+    if no_churn:
+        churn, weight = 0, 1.0
+    else:
+        churn = churn_commits(fn["file"], churn_window)
+        weight = churn_weight(churn)
+    tag, delta = _baseline_tag(base_score, baseline_map.get(_baseline_key(fn)))
+    return {
+        "file": fn["file"],
+        "name": fn["name"],
+        "start_line": int(fn["start_line"]),
+        "end_line": int(fn["end_line"]),
+        "cc": cc,
+        "arg_signature": fn.get("arg_signature", ""),
+        "line_cov": line_cov,
+        "mut_kill": mut_kill,
+        "eff_cov": eff_cov,
+        "churn": churn,
+        "weight": weight,
+        "crap": base_score,
+        "crap_weighted": base_score * weight,
+        "tag": tag,
+        "delta": delta,
+        "survived_mutants": survived_mutants,
+        "dominant_axis": _dominant_axis(cc, line_cov, eff_cov),
+    }
+
+
+def _write_baseline(rows: list[dict[str, Any]], survivors: list[dict[str, Any]],
+                    all_functions: list[dict[str, Any]], out_path: str) -> int:
+    # Baseline for ALL functions, not just survivors, so a future branch
+    # can detect "new function above threshold" using the registry.
+    # Survivors get measurements; other functions get cc-only defaults.
+    survivor_keys = {_baseline_key(fn): True for fn in survivors}
+    all_rows: list[dict[str, Any]] = [{
+        "file": r["file"], "name": r["name"],
+        "arg_signature": r["arg_signature"],
+        "cc": r["cc"], "crap": r["crap"], "eff_cov": r["eff_cov"],
+    } for r in rows]
+    for fn in all_functions:
+        if _baseline_key(fn) in survivor_keys:
+            continue
+        all_rows.append({
+            "file": fn["file"], "name": fn["name"],
+            "arg_signature": fn.get("arg_signature", ""),
+            "cc": int(fn["cc"]), "crap": float(int(fn["cc"])),  # eff_cov=1 → crap = cc
+            "eff_cov": 1.0,
+        })
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump({"rows": all_rows}, fh, indent=2, sort_keys=True)
+    eprint(f"crap: wrote baseline with {len(all_rows)} functions → {out_path}")
+    return 0
+
+
+def _compute_summary(rows: list[dict[str, Any]], total_functions: int,
+                     survivors_count: int, threshold: float) -> dict[str, Any]:
+    above = sum(1 for r in rows if r["crap"] > threshold)
+    # Savoia's 5% project rule. Denominator is ALL methods — functions below
+    # CRAP_max are guaranteed below threshold, so they count as "not above".
+    pct_above = (above / total_functions * 100.0) if total_functions else 0.0
+    return {
+        "threshold": threshold,
+        "total_functions": total_functions,
+        "survivors": survivors_count,
+        "above_threshold": above,
+        "project_pct_above_threshold": round(pct_above, 2),
+        "project_crappy": pct_above > 5.0,
+        "regressions": sum(1 for r in rows if r["tag"] == "regressed" and r["crap"] > threshold),
+        "new_above_threshold": sum(1 for r in rows if r["tag"] == "new" and r["crap"] > threshold),
+    }
+
+
+def _emit_summary(summary: dict[str, Any]) -> None:
+    eprint(f"crap: {summary['above_threshold']}/{summary['survivors']} over threshold; "
+           f"{summary['regressions']} regressed, {summary['new_above_threshold']} new")
+    verdict = "CRAPPY" if summary["project_crappy"] else "clean"
+    eprint(f"crap: {summary['project_pct_above_threshold']:.1f}% of "
+           f"{summary['total_functions']} methods above CRAP {summary['threshold']} "
+           f"— project is {verdict} by Savoia's 5% rule")
+
+
+def _exit_code(rows: list[dict[str, Any]], threshold: float) -> int:
+    any_regression = any(r["tag"] in ("regressed", "new") and r["crap"] > threshold for r in rows)
+    if any_regression:
+        return 2
+    if any(r["crap"] > threshold for r in rows):
+        return 1
+    return 0
+
+
 def cmd_score(args: argparse.Namespace) -> int:
     functions = load_json(args.functions)
     survivors = load_json(args.survivors)
@@ -719,176 +870,28 @@ def cmd_score(args: argparse.Namespace) -> int:
     cache_dir = Path(args.cache) if args.cache else None
     if cache_dir is not None:
         cache_dir.mkdir(parents=True, exist_ok=True)
-
     baseline_map = load_baseline(args.baseline) if not args.no_baseline else {}
 
-    rows: list[dict[str, Any]] = []
-    for fn in survivors:
-        cc = int(fn["cc"])
-        file = fn["file"]
-        start = int(fn["start_line"])
-        end = int(fn["end_line"])
-
-        # Prefer cached measurement if available
-        h = fn.get("_hash") or function_hash(fn, args.toolchain_tag or "")
-        fn["_hash"] = h
-        cached = cached_results.get(h)
-
-        if cached:
-            line_cov_frac = float(cached.get("line_cov", 0.0))
-            mut_kill_frac = float(cached.get("mut_kill", 1.0))
-            survived_mutants = list(cached.get("survived_mutants") or [])
-        else:
-            hit, total = _slice_coverage(coverage, file, start, end)
-            line_cov_frac = (hit / total) if total > 0 else 0.0
-
-            killed, survived, survived_mutants = _slice_mutation(mutation, file, start, end)
-            mut_total = killed + survived
-            # If no mutation data at all for the function, treat as 1.0 (don't
-            # punish for a tool that wasn't run). Users who want mutation-
-            # downgraded scores must actually run mutation on the file.
-            mut_kill_frac = (killed / mut_total) if mut_total > 0 else 1.0
-
-            # Only cache when we actually measured something. Caching a "no
-            # data" default would shadow a real measurement on the next run.
-            measured = total > 0 or mut_total > 0
-            if cache_dir is not None and measured:
-                cache_file = cache_dir / (h + ".json")
-                try:
-                    with open(cache_file, "w", encoding="utf-8") as fh:
-                        json.dump({
-                            "line_cov": line_cov_frac,
-                            "mut_kill": mut_kill_frac,
-                            "survived_mutants": survived_mutants,
-                        }, fh)
-                except OSError:
-                    pass
-
-        eff_cov_frac = line_cov_frac * mut_kill_frac
-        base_score = crap_score(cc, eff_cov_frac * 100.0)
-
-        if args.no_churn:
-            churn = 0
-            weight = 1.0
-        else:
-            churn = churn_commits(file, args.churn_window)
-            weight = churn_weight(churn)
-        weighted = base_score * weight
-
-        # Baseline diff
-        key = _baseline_key(fn)
-        prev = baseline_map.get(key)
-        if prev is None:
-            tag = "new"
-            delta = None
-        else:
-            prev_crap = float(prev.get("crap", 0.0))
-            delta = base_score - prev_crap
-            if delta > 0.5:
-                tag = "regressed"
-            elif delta < -0.5:
-                tag = "improved"
-            else:
-                tag = "same"
-
-        rows.append({
-            "file": file,
-            "name": fn["name"],
-            "start_line": start,
-            "end_line": end,
-            "cc": cc,
-            "arg_signature": fn.get("arg_signature", ""),
-            "line_cov": line_cov_frac,
-            "mut_kill": mut_kill_frac,
-            "eff_cov": eff_cov_frac,
-            "churn": churn,
-            "weight": weight,
-            "crap": base_score,
-            "crap_weighted": weighted,
-            "tag": tag,
-            "delta": delta,
-            "survived_mutants": survived_mutants,
-            "dominant_axis": _dominant_axis(cc, line_cov_frac, eff_cov_frac),
-        })
-
-    # Sort by churn-weighted CRAP descending
+    rows = [
+        _score_one(fn, coverage, mutation, cached_results, cache_dir,
+                   args.toolchain_tag or "", baseline_map,
+                   args.no_churn, args.churn_window)
+        for fn in survivors
+    ]
     rows.sort(key=lambda r: r["crap_weighted"], reverse=True)
 
-    # --set-baseline: write and exit without gating
     if args.set_baseline:
-        # Baseline for ALL functions, not just survivors, so a future branch
-        # can detect "new function above threshold" using the registry.
-        # We include measurements for survivors and cc=0 defaults for the rest.
-        all_rows: list[dict[str, Any]] = []
-        survivor_keys = {_baseline_key(fn): True for fn in survivors}
-        # Start with scored rows
-        for r in rows:
-            all_rows.append({
-                "file": r["file"], "name": r["name"],
-                "arg_signature": r["arg_signature"],
-                "cc": r["cc"], "crap": r["crap"], "eff_cov": r["eff_cov"],
-            })
-        # Add remaining functions with CRAP_max lower bound (best-case)
-        for fn in functions:
-            k = _baseline_key(fn)
-            if k in survivor_keys:
-                continue
-            all_rows.append({
-                "file": fn["file"], "name": fn["name"],
-                "arg_signature": fn.get("arg_signature", ""),
-                "cc": int(fn["cc"]), "crap": float(int(fn["cc"])),  # eff_cov=1 → crap = cc
-                "eff_cov": 1.0,
-            })
-        out_path = args.baseline or ".crap-baseline.json"
-        with open(out_path, "w", encoding="utf-8") as fh:
-            json.dump({"rows": all_rows}, fh, indent=2, sort_keys=True)
-        eprint(f"crap: wrote baseline with {len(all_rows)} functions → {out_path}")
-        return 0
+        return _write_baseline(rows, survivors, functions,
+                               args.baseline or ".crap-baseline.json")
 
-    # Render table
-    top_n = args.top or len(rows)
-    top_rows = rows[:top_n]
-    output = _render_markdown(top_rows, threshold=args.threshold)
-    print(output)
+    top_rows = rows[:(args.top or len(rows))]
+    print(_render_markdown(top_rows, threshold=args.threshold))
 
-    # Exit codes
-    any_regression = any(r["tag"] in ("regressed", "new") and r["crap"] > args.threshold
-                         for r in rows)
-    any_hit = any(r["crap"] > args.threshold for r in rows)
-
-    above_threshold = sum(1 for r in rows if r["crap"] > args.threshold)
-    # Savoia's project-level rule: >5% of methods above threshold = project is crappy.
-    # Denominator is all methods (functions filtered by CRAP_max prefilter are guaranteed
-    # below threshold, so they count as "not above").
-    project_pct = (above_threshold / len(functions) * 100.0) if functions else 0.0
-    project_crappy = project_pct > 5.0
-
-    summary = {
-        "threshold": args.threshold,
-        "total_functions": len(functions),
-        "survivors": len(survivors),
-        "above_threshold": above_threshold,
-        "project_pct_above_threshold": round(project_pct, 2),
-        "project_crappy": project_crappy,
-        "regressions": sum(1 for r in rows if r["tag"] == "regressed"
-                           and r["crap"] > args.threshold),
-        "new_above_threshold": sum(1 for r in rows if r["tag"] == "new"
-                                    and r["crap"] > args.threshold),
-    }
+    summary = _compute_summary(rows, len(functions), len(survivors), args.threshold)
     if args.summary_out:
         dump_json({"summary": summary, "rows": top_rows}, args.summary_out)
-
-    eprint(f"crap: {summary['above_threshold']}/{summary['survivors']} over threshold; "
-           f"{summary['regressions']} regressed, {summary['new_above_threshold']} new")
-    verdict = "CRAPPY" if project_crappy else "clean"
-    eprint(f"crap: {project_pct:.1f}% of {len(functions)} methods above CRAP {args.threshold} "
-           f"— project is {verdict} by Savoia's 5% rule")
-
-    if any_regression:
-        return 2
-    if any_hit:
-        return 1
-    return 0
+    _emit_summary(summary)
+    return _exit_code(rows, args.threshold)
 
 
 def _render_markdown(rows: list[dict[str, Any]], threshold: float) -> str:
